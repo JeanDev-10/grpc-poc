@@ -29,3 +29,9 @@ npm run dev:orders       # :50052
 npm run client -- list | bulk sku-003:10 | order sku-001:2 | watch
 npm test
 ```
+
+## Errores y deadlines (fase 3)
+- Inventory: `NOT_FOUND`, `INVALID_ARGUMENT`, `FAILED_PRECONDITION` con detalles `google.rpc.ErrorInfo` / `BadRequest`
+  (`packages/common/src/errors.ts`, protos en `proto/google/rpc/`).
+- Orders propaga el deadline del cliente a Inventory y compensa (`ReleaseStock`) si falla un item.
+- Demo: `LATENCY_MS=1000 npm run dev:inventory` y `DEADLINE_MS=300 npm run client -- order sku-001:2` => `DEADLINE_EXCEEDED`.

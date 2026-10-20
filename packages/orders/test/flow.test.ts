@@ -1,17 +1,21 @@
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import { afterAll, expect, test } from 'vitest';
 import * as grpc from '@grpc/grpc-js';
-import { InventoryService, type InventoryClient } from '@grpc-poc/common/src/inventory.js';
-import { NotificationsService, type Event, type NotificationsClient } from '@grpc-poc/common/src/notifications.js';
-import { OrdersService, type OrdersClient } from '@grpc-poc/common/src/orders.js';
-import { createHandlers as inventoryHandlers } from '../../inventory/src/service.js';
+import { rpc } from '@grpc-poc/common/src/call.js';
+import { decodeDetails } from '@grpc-poc/common/src/errors.js';
+import { InventoryService } from '@grpc-poc/common/src/inventory.js';
+import { NotificationsService, type Event } from '@grpc-poc/common/src/notifications.js';
+import { OrdersService } from '@grpc-poc/common/src/orders.js';
+import { createHandlers as inventoryHandlers, type InventoryOptions } from '../../inventory/src/service.js';
 import { createHandlers as notificationsHandlers } from '../../notifications/src/service.js';
 import { createHandlers as ordersHandlers } from '../src/service.js';
 
 const servers: grpc.Server[] = [];
 const clients: grpc.Client[] = [];
-let inventory: InventoryClient;
-let notifications: NotificationsClient;
-let orders: OrdersClient;
+
+afterAll(() => {
+  clients.forEach((c) => c.close());
+  servers.forEach((s) => s.forceShutdown());
+});
 
 async function start(add: (s: grpc.Server) => void): Promise<number> {
   const server = new grpc.Server();
@@ -28,28 +32,28 @@ const connect = <C extends grpc.Client>(Ctor: new (a: string, c: grpc.ChannelCre
   return c;
 };
 
-beforeAll(async () => {
-  const invPort = await start((s) => s.addService(InventoryService.service, inventoryHandlers({ a: 10, b: 0, c: 3 })));
+/** Levanta Inventory + Notifications + Orders en memoria, cada test con su propio entorno. */
+async function setup(stock: Record<string, number>, inventoryOpts: InventoryOptions = {}) {
+  const invPort = await start((s) => s.addService(InventoryService.service, inventoryHandlers(stock, inventoryOpts)));
   const notPort = await start((s) => s.addService(NotificationsService.service, notificationsHandlers()));
-  inventory = connect(InventoryService, invPort);
-  notifications = connect(NotificationsService, notPort);
+  const inventory = connect(InventoryService, invPort);
+  const notifications = connect(NotificationsService, notPort);
   const ordPort = await start((s) => s.addService(OrdersService.service, ordersHandlers(inventory, notifications)));
-  orders = connect(OrdersService, ordPort);
-});
+  return { inventory, notifications, orders: connect(OrdersService, ordPort) };
+}
 
-afterAll(() => {
-  clients.forEach((c) => c.close());
-  servers.forEach((s) => s.forceShutdown());
-});
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const fails = (p: Promise<unknown>) => p.then(() => Promise.reject(new Error('debía fallar')), (e: grpc.ServiceError) => e);
 
 test('server streaming: ListProducts emite un mensaje por producto', async () => {
-  const stream = inventory.ListProducts({ onlyInStock: true });
+  const { inventory } = await setup({ a: 10, b: 0, c: 3 });
   const ids: string[] = [];
-  for await (const p of stream) ids.push((p as { productId: string }).productId);
+  for await (const p of inventory.ListProducts({ onlyInStock: true })) ids.push((p as { productId: string }).productId);
   expect(ids).toEqual(['a', 'c']);
 });
 
 test('client streaming: BulkUpdateStock responde una sola vez con el resumen', async () => {
+  const { inventory } = await setup({ b: 0, c: 3 });
   const updated = await new Promise<number>((resolve, reject) => {
     const call = inventory.BulkUpdateStock((e, r) => (e ? reject(e) : resolve(r!.updated)));
     call.write({ productId: 'b', delta: 4 });
@@ -58,43 +62,91 @@ test('client streaming: BulkUpdateStock responde una sola vez con el resumen', a
   });
   expect(updated).toBe(2);
 
-  const stock = await new Promise<number>((resolve, reject) =>
-    inventory.GetStock({ productId: 'c' }, (e, r) => (e ? reject(e) : resolve(r!.available))),
-  );
-  expect(stock).toBe(0); // clamp a 0
+  const stock = await rpc<{ available: number }>((cb) => inventory.GetStock({ productId: 'c' }, cb));
+  expect(stock.available).toBe(0); // clamp a 0
 });
 
 test('bidi: CreateOrder publica un evento que Watch recibe filtrado', async () => {
+  const { notifications, orders } = await setup({ a: 10 });
   const watch = notifications.Watch();
   const received: Event[] = [];
   watch.on('data', (e) => received.push(e as Event));
   watch.write({ orderId: '' }); // todos
-  await new Promise((r) => setTimeout(r, 50));
+  await sleep(50);
 
-  const res = await new Promise<{ orderId: string; accepted: boolean }>((resolve, reject) =>
-    orders.CreateOrder({ items: [{ productId: 'a', quantity: 2 }] }, (e, r) => (e ? reject(e) : resolve(r!))),
+  const res = await rpc<{ orderId: string; accepted: boolean }>((cb) =>
+    orders.CreateOrder({ items: [{ productId: 'a', quantity: 2 }] }, cb),
   );
   expect(res.accepted).toBe(true);
 
-  await new Promise((r) => setTimeout(r, 100));
+  await sleep(100);
   expect(received).toHaveLength(1);
   expect(received[0]).toMatchObject({ orderId: res.orderId, type: 'ORDER_CREATED' });
 
   // Cambiamos el filtro a otro pedido: el siguiente evento no debe llegar.
   watch.write({ orderId: 'otro' });
-  await new Promise((r) => setTimeout(r, 50));
-  await new Promise((resolve, reject) =>
-    orders.CreateOrder({ items: [{ productId: 'a', quantity: 1 }] }, (e, r) => (e ? reject(e) : resolve(r))),
-  );
-  await new Promise((r) => setTimeout(r, 100));
+  await sleep(50);
+  await rpc((cb) => orders.CreateOrder({ items: [{ productId: 'a', quantity: 1 }] }, cb));
+  await sleep(100);
   expect(received).toHaveLength(1);
   watch.end();
 });
 
-test('CreateOrder rechaza cuando no hay stock', async () => {
-  const res = await new Promise<{ accepted: boolean; reason: string }>((resolve, reject) =>
-    orders.CreateOrder({ items: [{ productId: 'a', quantity: 999 }] }, (e, r) => (e ? reject(e) : resolve(r!))),
+test('CreateOrder sin stock => FAILED_PRECONDITION y los detalles de Inventory llegan al cliente', async () => {
+  const { orders } = await setup({ a: 10 });
+  const err = await fails(rpc((cb) => orders.CreateOrder({ items: [{ productId: 'a', quantity: 999 }] }, cb)));
+  expect(err.code).toBe(grpc.status.FAILED_PRECONDITION);
+  expect(decodeDetails(err)[0]).toMatchObject({ type: 'ErrorInfo', reason: 'INSUFFICIENT_STOCK' });
+});
+
+test('CreateOrder con producto inexistente => NOT_FOUND', async () => {
+  const { orders } = await setup({ a: 10 });
+  const err = await fails(rpc((cb) => orders.CreateOrder({ items: [{ productId: 'zzz', quantity: 1 }] }, cb)));
+  expect(err.code).toBe(grpc.status.NOT_FOUND);
+});
+
+test('CreateOrder sin items => INVALID_ARGUMENT', async () => {
+  const { orders } = await setup({ a: 10 });
+  const err = await fails(rpc((cb) => orders.CreateOrder({ items: [] }, cb)));
+  expect(err.code).toBe(grpc.status.INVALID_ARGUMENT);
+  expect(decodeDetails(err)[0]).toMatchObject({ type: 'BadRequest' });
+});
+
+test('compensación: si falla el 2º item se libera la reserva del 1º', async () => {
+  const { orders, inventory } = await setup({ a: 10, b: 1 });
+  const err = await fails(
+    rpc((cb) =>
+      orders.CreateOrder(
+        {
+          items: [
+            { productId: 'a', quantity: 4 },
+            { productId: 'b', quantity: 5 }, // no alcanza
+          ],
+        },
+        cb,
+      ),
+    ),
   );
-  expect(res.accepted).toBe(false);
-  expect(res.reason).toContain('a');
+  expect(err.code).toBe(grpc.status.FAILED_PRECONDITION);
+  const a = await rpc<{ available: number }>((cb) => inventory.GetStock({ productId: 'a' }, cb));
+  expect(a.available).toBe(10); // restaurado
+});
+
+test('deadline: Inventory lento => DEADLINE_EXCEEDED, Inventory deja de trabajar y no aplica la reserva', async () => {
+  let cancelled = 0;
+  const { orders, inventory } = await setup({ a: 10 }, { latencyMs: 1000, onCancel: () => cancelled++ });
+
+  const started = Date.now();
+  const err = await fails(
+    rpc((cb) =>
+      orders.CreateOrder({ items: [{ productId: 'a', quantity: 2 }] }, new grpc.Metadata(), { deadline: started + 200 }, cb),
+    ),
+  );
+  expect(err.code).toBe(grpc.status.DEADLINE_EXCEEDED);
+  expect(Date.now() - started).toBeLessThan(800); // no esperó la latencia completa
+
+  await sleep(150); // damos tiempo a que Inventory observe la cancelación
+  expect(cancelled).toBe(1);
+  const a = await rpc<{ available: number }>((cb) => inventory.GetStock({ productId: 'a' }, cb));
+  expect(a.available).toBe(10); // la reserva nunca se aplicó
 });

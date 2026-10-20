@@ -16,6 +16,8 @@ export interface ProtoGrpcType {
       Inventory: SubtypeConstructor<typeof grpc.Client, _inventory_v1_InventoryClient> & { service: _inventory_v1_InventoryDefinition }
       ListProductsRequest: MessageTypeDefinition
       Product: MessageTypeDefinition
+      ReleaseStockRequest: MessageTypeDefinition
+      ReleaseStockResponse: MessageTypeDefinition
       ReserveStockRequest: MessageTypeDefinition
       ReserveStockResponse: MessageTypeDefinition
       StockUpdate: MessageTypeDefinition

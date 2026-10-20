@@ -1,0 +1,18 @@
+// Subconjunto de google/rpc/error_details.proto: ErrorInfo y BadRequest.
+syntax = "proto3";
+
+package google.rpc;
+
+message ErrorInfo {
+  string reason = 1;
+  string domain = 2;
+  map<string, string> metadata = 3;
+}
+
+message BadRequest {
+  message FieldViolation {
+    string field = 1;
+    string description = 2;
+  }
+  repeated FieldViolation field_violations = 1;
+}

@@ -1,4 +1,5 @@
 import * as grpc from '@grpc/grpc-js';
+import { decodeDetails } from '@grpc-poc/common/src/errors.js';
 import { InventoryService } from '@grpc-poc/common/src/inventory.js';
 import { NotificationsService } from '@grpc-poc/common/src/notifications.js';
 import { OrdersService } from '@grpc-poc/common/src/orders.js';
@@ -11,10 +12,16 @@ const notifications = new NotificationsService(process.env.NOTIFICATIONS_ADDR ??
 const closeAll = () => [inventory, orders, notifications].forEach((c) => c.close());
 
 function done(err: grpc.ServiceError | null, res?: unknown) {
-  if (err) console.error(`ERROR ${grpc.status[err.code]}: ${err.details}`);
-  else console.log(JSON.stringify(res));
+  if (err) {
+    console.error(`ERROR ${grpc.status[err.code]}: ${err.details}`);
+    for (const d of decodeDetails(err)) console.error(`  detalle ${JSON.stringify(d)}`);
+  } else console.log(JSON.stringify(res));
   closeAll();
 }
+
+// DEADLINE_MS=200 npm run client -- order ... => la llamada falla si tarda más de 200 ms.
+const callOptions = (): grpc.CallOptions =>
+  process.env.DEADLINE_MS ? { deadline: Date.now() + Number(process.env.DEADLINE_MS) } : {};
 
 // "sku-001:5" -> ['sku-001', 5]
 const parsePair = (s: string): [string, number] => {
@@ -26,11 +33,16 @@ const [cmd, ...args] = process.argv.slice(2);
 
 switch (cmd) {
   case 'get':
-    inventory.GetStock({ productId: args[0] ?? 'sku-001' }, done);
+    inventory.GetStock({ productId: args[0] ?? 'sku-001' }, new grpc.Metadata(), callOptions(), done);
     break;
 
   case 'reserve':
-    inventory.ReserveStock({ productId: args[0] ?? 'sku-001', quantity: Number(args[1] ?? 1) }, done);
+    inventory.ReserveStock(
+      { productId: args[0] ?? 'sku-001', quantity: Number(args[1] ?? 1) },
+      new grpc.Metadata(),
+      callOptions(),
+      done,
+    );
     break;
 
   // Server streaming: leemos hasta que el servidor cierra el stream.
@@ -54,7 +66,12 @@ switch (cmd) {
   }
 
   case 'order':
-    orders.CreateOrder({ items: args.map(parsePair).map(([productId, quantity]) => ({ productId, quantity })) }, done);
+    orders.CreateOrder(
+      { items: args.map(parsePair).map(([productId, quantity]) => ({ productId, quantity })) },
+      new grpc.Metadata(),
+      callOptions(),
+      done,
+    );
     break;
 
   // Bidi: enviamos el filtro y escuchamos eventos hasta Ctrl+C.
