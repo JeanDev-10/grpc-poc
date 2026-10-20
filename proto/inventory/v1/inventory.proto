@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package inventory.v1;
+
+service Inventory {
+  // Devuelve el stock disponible de un producto.
+  rpc GetStock (GetStockRequest) returns (GetStockResponse);
+  // Reserva unidades de un producto (descuenta del stock disponible).
+  rpc ReserveStock (ReserveStockRequest) returns (ReserveStockResponse);
+}
+
+message GetStockRequest {
+  string product_id = 1;
+}
+
+message GetStockResponse {
+  string product_id = 1;
+  int32 available = 2;
+}
+
+message ReserveStockRequest {
+  string product_id = 1;
+  int32 quantity = 2;
+}
+
+message ReserveStockResponse {
+  bool reserved = 1;
+  int32 remaining = 2;
+}
