@@ -35,3 +35,11 @@ npm test
   (`packages/common/src/errors.ts`, protos en `proto/google/rpc/`).
 - Orders propaga el deadline del cliente a Inventory y compensa (`ReleaseStock`) si falla un item.
 - Demo: `LATENCY_MS=1000 npm run dev:inventory` y `DEADLINE_MS=300 npm run client -- order sku-001:2` => `DEADLINE_EXCEEDED`.
+
+## Metadata, interceptores y auth (fase 4)
+- `packages/common/src/interceptors.ts`: `observabilityInterceptor` (x-request-id + log JSON por llamada),
+  `authInterceptor` (JWT HS256, `UNAUTHENTICATED` / `PERMISSION_DENIED` por scope) y `clientInterceptor`.
+- `packages/common/src/scopes.ts`: scope requerido por método. Orders llama a los demás con su propia identidad (`svc:orders`).
+- CLI: `NO_AUTH=1`, `TOKEN=abc`, `SCOPES="inventory:read"` para ver cada tipo de rechazo; imprime el `request-id`
+  para buscarlo en los logs de los tres servicios.
+- `JWT_SECRET` por defecto es solo para desarrollo.

@@ -2,45 +2,10 @@ import { afterAll, expect, test } from 'vitest';
 import * as grpc from '@grpc/grpc-js';
 import { rpc } from '@grpc-poc/common/src/call.js';
 import { decodeDetails } from '@grpc-poc/common/src/errors.js';
-import { InventoryService } from '@grpc-poc/common/src/inventory.js';
-import { NotificationsService, type Event } from '@grpc-poc/common/src/notifications.js';
-import { OrdersService } from '@grpc-poc/common/src/orders.js';
-import { createHandlers as inventoryHandlers, type InventoryOptions } from '../../inventory/src/service.js';
-import { createHandlers as notificationsHandlers } from '../../notifications/src/service.js';
-import { createHandlers as ordersHandlers } from '../src/service.js';
+import type { Event } from '@grpc-poc/common/src/notifications.js';
+import { closeAll, setup } from './harness.js';
 
-const servers: grpc.Server[] = [];
-const clients: grpc.Client[] = [];
-
-afterAll(() => {
-  clients.forEach((c) => c.close());
-  servers.forEach((s) => s.forceShutdown());
-});
-
-async function start(add: (s: grpc.Server) => void): Promise<number> {
-  const server = new grpc.Server();
-  add(server);
-  servers.push(server);
-  return new Promise((resolve, reject) =>
-    server.bindAsync('127.0.0.1:0', grpc.ServerCredentials.createInsecure(), (e, p) => (e ? reject(e) : resolve(p))),
-  );
-}
-
-const connect = <C extends grpc.Client>(Ctor: new (a: string, c: grpc.ChannelCredentials) => C, port: number) => {
-  const c = new Ctor(`127.0.0.1:${port}`, grpc.credentials.createInsecure());
-  clients.push(c);
-  return c;
-};
-
-/** Levanta Inventory + Notifications + Orders en memoria, cada test con su propio entorno. */
-async function setup(stock: Record<string, number>, inventoryOpts: InventoryOptions = {}) {
-  const invPort = await start((s) => s.addService(InventoryService.service, inventoryHandlers(stock, inventoryOpts)));
-  const notPort = await start((s) => s.addService(NotificationsService.service, notificationsHandlers()));
-  const inventory = connect(InventoryService, invPort);
-  const notifications = connect(NotificationsService, notPort);
-  const ordPort = await start((s) => s.addService(OrdersService.service, ordersHandlers(inventory, notifications)));
-  return { inventory, notifications, orders: connect(OrdersService, ordPort) };
-}
+afterAll(closeAll);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const fails = (p: Promise<unknown>) => p.then(() => Promise.reject(new Error('debía fallar')), (e: grpc.ServiceError) => e);
