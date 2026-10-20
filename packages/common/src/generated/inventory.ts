@@ -10,11 +10,15 @@ type SubtypeConstructor<Constructor extends new (...args: any) => any, Subtype> 
 export interface ProtoGrpcType {
   inventory: {
     v1: {
+      BulkUpdateStockResponse: MessageTypeDefinition
       GetStockRequest: MessageTypeDefinition
       GetStockResponse: MessageTypeDefinition
       Inventory: SubtypeConstructor<typeof grpc.Client, _inventory_v1_InventoryClient> & { service: _inventory_v1_InventoryDefinition }
+      ListProductsRequest: MessageTypeDefinition
+      Product: MessageTypeDefinition
       ReserveStockRequest: MessageTypeDefinition
       ReserveStockResponse: MessageTypeDefinition
+      StockUpdate: MessageTypeDefinition
     }
   }
 }

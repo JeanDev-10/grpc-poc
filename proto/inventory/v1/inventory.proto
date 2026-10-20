@@ -7,6 +7,10 @@ service Inventory {
   rpc GetStock (GetStockRequest) returns (GetStockResponse);
   // Reserva unidades de un producto (descuenta del stock disponible).
   rpc ReserveStock (ReserveStockRequest) returns (ReserveStockResponse);
+  // Server streaming: el servidor emite un Product por cada producto.
+  rpc ListProducts (ListProductsRequest) returns (stream Product);
+  // Client streaming: el cliente envía N ajustes y recibe un único resumen.
+  rpc BulkUpdateStock (stream StockUpdate) returns (BulkUpdateStockResponse);
 }
 
 message GetStockRequest {
@@ -26,4 +30,23 @@ message ReserveStockRequest {
 message ReserveStockResponse {
   bool reserved = 1;
   int32 remaining = 2;
+}
+
+message ListProductsRequest {
+  bool only_in_stock = 1;
+}
+
+message Product {
+  string product_id = 1;
+  int32 available = 2;
+}
+
+message StockUpdate {
+  string product_id = 1;
+  // Positivo suma stock, negativo resta (el stock nunca baja de 0).
+  int32 delta = 2;
+}
+
+message BulkUpdateStockResponse {
+  int32 updated = 1;
 }

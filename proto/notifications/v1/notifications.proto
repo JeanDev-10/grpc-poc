@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package notifications.v1;
+
+service Notifications {
+  // Unary: lo usan otros servicios (Orders) para publicar eventos.
+  rpc Publish (Event) returns (PublishResponse);
+  // Bidi: el cliente envía filtros cuando quiera y el servidor emite eventos
+  // que coincidan con el último filtro recibido.
+  rpc Watch (stream WatchRequest) returns (stream Event);
+}
+
+message Event {
+  string order_id = 1;
+  string type = 2;
+  string message = 3;
+}
+
+message PublishResponse {}
+
+message WatchRequest {
+  // Vacío = todos los pedidos. Cada mensaje reemplaza el filtro anterior.
+  string order_id = 1;
+}

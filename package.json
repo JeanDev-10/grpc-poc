@@ -4,7 +4,9 @@
   "type": "module",
   "workspaces": ["packages/*"],
   "scripts": {
-    "gen:types": "proto-loader-gen-types --longs=String --enums=String --defaults --oneofs --grpcLib=@grpc/grpc-js --outDir=packages/common/src/generated inventory/v1/inventory.proto --includeDirs=proto",
+    "gen:types": "proto-loader-gen-types --longs=String --enums=String --defaults --oneofs --grpcLib=@grpc/grpc-js --outDir=packages/common/src/generated inventory/v1/inventory.proto orders/v1/orders.proto notifications/v1/notifications.proto --includeDirs=proto",
+    "dev:orders": "tsx packages/orders/src/server.ts",
+    "dev:notifications": "tsx packages/notifications/src/server.ts",
     "dev:inventory": "tsx packages/inventory/src/server.ts",
     "client": "tsx packages/client/src/cli.ts",
     "typecheck": "tsc --noEmit",
